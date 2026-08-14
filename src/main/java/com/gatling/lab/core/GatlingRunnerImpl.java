@@ -17,12 +17,9 @@ public class GatlingRunnerImpl implements GatlingRunner {
 
     @Override
     public int runSimulations(Set<String> simulations) {
-        if (simulations.isEmpty()) {
-            log.warn("No Simulations Found");
-            return 0;
-        }
+        int failed = 0;
 
-        simulations.forEach(simulation -> {
+        for (String simulation : simulations) {
             Instant start = Instant.now();
             log.info("Start com.gatling.lab.simulation: {}", simulation);
 
@@ -30,12 +27,21 @@ public class GatlingRunnerImpl implements GatlingRunner {
                     .simulationClass(simulation)
                     .resourcesDirectory(props.getRessourceDir())
                     .resultsDirectory(props.getResultDir());
-            Gatling.fromMap(builder.build());
+
+            // Gatling reports 0 when the run completed and all of its assertions
+            // held. A simulation that declares no assertion therefore reports 0
+            // even if every one of its requests failed: assertions are what makes
+            // a failed run observable here, and in turn in the process exit code.
+            int status = Gatling.fromMap(builder.build());
+            if (status != 0) {
+                failed++;
+                log.error("Simulation {} failed, Gatling status: {}", simulation, status);
+            }
 
             log.info("End com.gatling.lab.simulation: {}, duration: {}", simulation,
                     Duration.between(start, Instant.now()));
-        });
+        }
 
-        return simulations.size();
+        return failed;
     }
 }
