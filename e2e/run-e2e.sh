@@ -25,6 +25,13 @@ readonly RUN_LOG="${WORK_DIR}/cli-run.log"
 readonly STUB_HOST="computer-database.gatling.io"
 readonly STUB_PORT=80
 readonly HOSTS_MARKER="# added by gatling-fatjar e2e"
+# Exit codes contracted by EngineCli, plus picocli's own usage exit code.
+# EXIT_SIMULATION_FAILED (1) is not asserted below: it is driven by Gatling's
+# own status, which depends on assertions, and none of the bundled simulations
+# declares any -- so no input reaches it from the CLI.
+readonly EXIT_OK=0
+readonly EXIT_USAGE=2
+readonly EXIT_NO_SIMULATION=3
 # Requests issued by each of the bundled scenarios.
 readonly EXPECTED_REQUESTS=10
 # Simulations reachable from the com.gatling.lab.simulation package, sub-packages
@@ -38,6 +45,15 @@ log()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 pass() { printf '    \033[32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '    \033[31mFAIL\033[0m %s\n' "$*"; failures=$((failures + 1)); }
+
+# assert_rc <expected> <actual> <label>
+assert_rc() {
+  if [[ "$2" -eq "$1" ]]; then
+    pass "$3: exit code $2"
+  else
+    fail "$3: exit code $2, expected $1"
+  fi
+}
 
 as_root() {
   if [[ "$(id -u)" -eq 0 ]]; then
@@ -57,8 +73,8 @@ trap cleanup EXIT
 
 # Runs the fat jar with the e2e logging config, streaming output to the console
 # and to $RUN_LOG. Sets `cli_rc` to the exit code of java (not of the pipe).
-# errexit/pipefail are lifted around the call: the CLI exits non-zero even on a
-# successful run, and callers assert on the exit code explicitly.
+# errexit/pipefail are lifted around the call: several cases below expect a
+# non-zero exit, and callers assert on the exit code explicitly.
 run_cli() {
   set +e
   java -Dlogback.configurationFile="${REPO_ROOT}/e2e/logback-e2e.xml" \
@@ -208,6 +224,34 @@ if grep -qaE 'Found simulations: 0\b' "${RUN_LOG}" \
 else
   fail "unknown simulation name: expected 'Found simulations: 0' + 'No Simulations Found'"
 fi
+assert_rc "${EXIT_NO_SIMULATION}" "${cli_rc}" "unknown simulation name"
+
+# --------------------------------------------------------------------------
+# 3b. Contradictory options are rejected instead of being silently ignored
+# --------------------------------------------------------------------------
+log "Test 3b: --all and --simul are mutually exclusive"
+
+run_cli -p com.gatling.lab.simulation --all -s BasicSimulation1 -rd "${WORK_DIR}/conflict"
+
+assert_rc "${EXIT_USAGE}" "${cli_rc}" "--all with --simul"
+
+if grep -qaF -- '--all and --simul are mutually exclusive' "${RUN_LOG}"; then
+  pass "--all with --simul: reported the conflict"
+else
+  fail "--all with --simul: expected the conflict to be reported"
+fi
+
+if grep -qaF 'Usage: gatling' "${RUN_LOG}"; then
+  pass "--all with --simul: printed the usage help"
+else
+  fail "--all with --simul: expected the usage help"
+fi
+
+if [[ -e "${WORK_DIR}/conflict" ]]; then
+  fail "--all with --simul: a run was started despite the usage error"
+else
+  pass "--all with --simul: nothing was run"
+fi
 
 # --------------------------------------------------------------------------
 # 4. One simulation, selected by name, run end to end against the local stub
@@ -264,15 +308,7 @@ else
   fail "Gatling never reported the simulation as completed"
 fi
 
-# EngineCli.call() currently returns 1 even on success, so java exits 1 on a
-# healthy run. Both 0 and 1 are accepted so this test keeps passing whether or
-# not that gets fixed; the verdict on the run itself comes from the report
-# assertions, which is what makes the ambiguity tolerable here.
-if [[ "${single_rc}" -eq 0 || "${single_rc}" -eq 1 ]]; then
-  pass "exit code ${single_rc}"
-else
-  fail "unexpected exit code ${single_rc}"
-fi
+assert_rc "${EXIT_OK}" "${single_rc}" "successful run"
 
 mapfile -t single_reports < <(find "${single_results}" -mindepth 1 -maxdepth 1 -type d | sort)
 if [[ "${#single_reports[@]}" -eq 1 ]]; then
@@ -291,7 +327,8 @@ fi
 log "Test 5: all simulations of a package in one run"
 
 all_results="${WORK_DIR}/results-all"
-run_cli -p com.gatling.lab.simulation -rd "${all_results}"
+run_cli -p com.gatling.lab.simulation --all -rd "${all_results}"
+assert_rc "${EXIT_OK}" "${cli_rc}" "run of the whole package"
 
 if grep -qaE "Found simulations: ${EXPECTED_SIMULATIONS}\b" "${RUN_LOG}"; then
   pass "discovered ${EXPECTED_SIMULATIONS} simulations across the package tree"
