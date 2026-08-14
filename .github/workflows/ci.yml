@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Lombok 1.18.22 (the version on master) cannot process the JDK 21 AST, so the
+  # build is pinned to 17 rather than tracking the runner's default JDK.
+  JAVA_VERSION: '17'
+  JAVA_DISTRIBUTION: temurin
+  MVN_FLAGS: -B -ntp
+
+jobs:
+  build:
+    name: compile / test / package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: maven
+
+      - name: mvn compile
+        run: mvn $MVN_FLAGS compile
+
+      - name: mvn test
+        run: mvn $MVN_FLAGS test
+
+      - name: mvn package
+        run: mvn $MVN_FLAGS package
+
+      - name: Summarise the built artifact
+        run: |
+          ls -lh target/*.jar
+          unzip -p target/gatling-fatjar-*.jar META-INF/MANIFEST.MF
+
+      # The e2e job runs the jar exactly as it comes out of `mvn package`, so it
+      # is handed over as an artifact instead of being rebuilt. The glob leaves
+      # out the shade plugin's original-*.jar on purpose.
+      - name: Upload the fat jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: gatling-fatjar
+          path: target/gatling-fatjar-*.jar
+          if-no-files-found: error
+          retention-days: 7
+
+  e2e:
+    name: e2e (fat jar)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Download the fat jar
+        uses: actions/download-artifact@v4
+        with:
+          name: gatling-fatjar
+          path: target
+
+      # Runs the packaged jar through `java -jar`: CLI, simulation discovery,
+      # and real Gatling runs against a local stub. See e2e/run-e2e.sh.
+      - name: Run the e2e suite
+        run: ./e2e/run-e2e.sh
+
+      # Kept on failure so a broken run can be diagnosed from the Gatling
+      # reports and the stub's access log rather than from the console alone.
+      - name: Upload the e2e output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-output
+          path: target/e2e
+          retention-days: 7
