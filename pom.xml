@@ -12,33 +12,43 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
     <!-- main dependencies -->
-    <gatling.version>3.7.3</gatling.version>
+    <gatling.version>3.15.1</gatling.version>
     <picocli.version>4.7.7</picocli.version>
     <reflections.version>0.10.2</reflections.version>
     <lombok.version>1.18.46</lombok.version>
-    <slf4j-api.version>1.7.36</slf4j-api.version>
+    <!-- Logback 1.5.x, which Gatling 3.15 pulls in, requires the SLF4J 2 API. -->
+    <slf4j-api.version>2.0.17</slf4j-api.version>
     <commons-lang3.version>3.20.0</commons-lang3.version>
 
-    <!-- transitive dependency pins (CVE remediation for versions bundled by Gatling 3.7.3) -->
-    <netty-bom.version>4.1.136.Final</netty-bom.version>
+    <!-- transitive dependency pins (CVE remediation for versions bundled by Gatling) -->
+    <netty-bom.version>4.2.14.Final</netty-bom.version>
     <scala-library.version>2.13.18</scala-library.version>
-    <logback.version>1.2.13</logback.version>
+    <logback.version>1.5.32</logback.version>
     <jackson.version>2.18.9</jackson.version>
 
     <!-- maven plugins versions -->
     <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
     <maven-jar-plugin.version>3.2.0</maven-jar-plugin.version>
     <maven-shade-plugin.version>3.6.2</maven-shade-plugin.version>
-    <gatling-maven-plugin.version>4.0.1</gatling-maven-plugin.version>
+    <gatling-maven-plugin.version>4.21.10</gatling-maven-plugin.version>
 
   </properties>
 
   <!--
     dependencyManagement: pins transitive dependencies pulled in by
-    io.gatling.highcharts:gatling-charts-highcharts:3.7.3 to patched versions.
+    io.gatling.highcharts:gatling-charts-highcharts to patched versions.
     These artifacts are already present on the classpath transitively; nothing
     new is added here, only their resolved versions are constrained to fix
-    known CVEs (see PR description for the full CVE list per artifact).
+    known CVEs.
+
+    Two of these pins had to move with the Gatling 3.15 upgrade, and both were
+    caught by running the packaged jar, not by compiling it:
+      - logback tracks what Gatling resolves (1.5.32). Holding it at the 1.2.x
+        line, right for Gatling 3.7.3, breaks the runtime: Logback 1.5 and the
+        SLF4J 2 API come as a pair.
+      - netty moved to the 4.2.x line. Gatling 3.15 uses io.netty.channel.IoHandle,
+        which does not exist in 4.1.x, so a 4.1 pin fails with NoClassDefFoundError
+        the moment a simulation starts.
   -->
   <dependencyManagement>
     <dependencies>

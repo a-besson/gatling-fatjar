@@ -61,7 +61,8 @@ public class EngineCli implements Callable<Integer> {
     @Option(names = { "--resultdir", "-rd" })
     private String resultDir;
 
-    @Option(names = {"--ressourcedir", "-r"})
+    @Option(names = {"--ressourcedir", "-r"},
+            description = "Deprecated, ignored: Gatling 3.15 dropped per-run resource directories")
     private String ressourceDir;
 
     @Spec
@@ -93,8 +94,6 @@ public class EngineCli implements Callable<Integer> {
         }
 
         GatlingRunner runner = new GatlingRunnerImpl(GatlingProperties.builder()
-                .simulationPath(this.simulationPath)
-                .ressourceDir(this.ressourceDir)
                 .resultDir(this.resultDir)
                 .build());
 
@@ -120,12 +119,13 @@ public class EngineCli implements Callable<Integer> {
                             + "--simul runs the ones matching a name.");
         }
 
-        Path path = Paths.get(EngineCli.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-        if (isEmpty(this.ressourceDir)) {
-            this.ressourceDir = path.toString();
+        if (isNotEmpty(this.ressourceDir)) {
+            log.warn("--ressourcedir is ignored: Gatling no longer takes a resource directory per run, "
+                    + "resources are resolved from the classpath and gatling.conf");
         }
 
         if (isEmpty(this.resultDir)) {
+            Path path = Paths.get(EngineCli.class.getProtectionDomain().getCodeSource().getLocation().toURI());
             this.resultDir = path.getParent() + "/results";
         }
     }

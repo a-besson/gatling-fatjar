@@ -19,7 +19,8 @@ Gatling cli runner. Can be used to run multiple simulations
   -p, --path=<simulationPath>
                              Simulations base package
   -r, --ressourcedir=<ressourceDir>
-
+                             Deprecated, ignored: Gatling 3.15 dropped per-run
+                               resource directories
       -rd, --resultdir=<resultDir>
 
   -s, --simul=<simulation>   Simulation name
@@ -28,6 +29,11 @@ Gatling cli runner. Can be used to run multiple simulations
 
 `--all` and `--simul` are mutually exclusive: `--all` is what already happens
 when no name is given, so passing both can only be a mistake and is rejected.
+
+`--ressourcedir` is accepted for backwards compatibility but ignored, and says
+so. Gatling 3.15 removed the per-run resource directory (`GatlingArgs` has no
+counterpart to the old `GatlingPropertiesBuilder.resourcesDirectory`); resources
+are resolved from the classpath and `gatling.conf`.
 
 **Run simulations:**
 ```shell
@@ -51,6 +57,28 @@ Gatling reports a simulation as failed when one of its **assertions** does not
 hold. The simulations bundled here declare none, so a run whose requests all
 fail still exits `0` — add assertions to a simulation for its failures to reach
 the exit code.
+
+How simulations are run
+--------------------------------------------
+
+Each simulation runs in its own forked JVM, through Gatling's supported entry
+point:
+
+```shell
+java --add-opens=java.base/java.lang=ALL-UNNAMED -cp <fat jar> io.gatling.app.Gatling \
+     --simulation <class> --results-folder <dir>
+```
+
+Gatling 3.15 removed the programmatic entry point this project used to call
+(`Gatling.fromMap`). What is left is `Gatling.main`, which ends with
+`sys.exit`, and `Gatling.fromArgs`, which is `private[gatling]` **and** shuts
+the Logback context down at the end of every run — so a loop of simulations in
+a single JVM would run 2..n with logging dead.
+
+Forking sidesteps both: every simulation gets a clean JVM (fresh Logback, fresh
+`ActorSystem`, fresh configuration), only the documented entry point is used,
+and each run hands back its own exit code. The `--add-opens` flag Gatling needs
+on JDK 16+ is injected by the runner, so `java -jar` stays as simple as before.
 
 Continuous integration
 --------------------------------------------

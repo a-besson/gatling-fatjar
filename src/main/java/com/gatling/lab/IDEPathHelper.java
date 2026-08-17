@@ -10,7 +10,6 @@ public class IDEPathHelper {
     public static final Path mavenResourcesDirectory;
     public static final Path mavenBinariesDirectory;
     public static final Path resultsDirectory;
-    public static final Path recorderConfigFile;
 
     static {
         try {
@@ -22,7 +21,8 @@ public class IDEPathHelper {
             mavenResourcesDirectory = mavenSrcTestDirectory.resolve("resources");
             mavenBinariesDirectory = mavenTargetDirectory.resolve("test-classes");
             resultsDirectory = mavenTargetDirectory.resolve("gatling");
-            recorderConfigFile = mavenResourcesDirectory.resolve("recorder.conf");
+            // No recorderConfigFile: since Gatling 3.15 the recorder takes its
+            // settings from CLI arguments only, there is no config file to pass.
         } catch (URISyntaxException e) {
             throw new ExceptionInInitializerError(e);
         }

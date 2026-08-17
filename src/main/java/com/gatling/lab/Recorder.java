@@ -1,18 +1,19 @@
 package com.gatling.lab;
 
 import io.gatling.recorder.GatlingRecorder;
-import io.gatling.recorder.config.RecorderPropertiesBuilder;
-import scala.Option;
-
-import java.nio.file.Path;
 
 public class Recorder {
-    public static void main(String[] args) {
-        RecorderPropertiesBuilder props = new RecorderPropertiesBuilder()
-                .simulationsFolder(IDEPathHelper.mavenSourcesDirectory.toString())
-                .resourcesFolder(IDEPathHelper.mavenResourcesDirectory.toString())
-                .simulationPackage("com.gatling.lab.simulation");
 
-        GatlingRecorder.fromMap(props.build(), Option.<Path>apply(IDEPathHelper.recorderConfigFile));
+    // Gatling 3.15 removed RecorderPropertiesBuilder and GatlingRecorder.fromMap;
+    // the recorder is now driven by its CLI arguments, parsed by RecorderArgsParser.
+    public static void main(String[] args) {
+        GatlingRecorder.main(new String[] {
+                "--simulations-folder", IDEPathHelper.mavenSourcesDirectory.toString(),
+                "--resources-folder", IDEPathHelper.mavenResourcesDirectory.toString(),
+                "--package", "com.gatling.lab.simulation",
+                // Must match maven.compiler.release: left unset, the recorder picks
+                // its format from the running JVM and would emit Java 17 sources.
+                "--format", "java11"
+        });
     }
 }
