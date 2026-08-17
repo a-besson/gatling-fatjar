@@ -9,7 +9,6 @@ public class EngineLocal {
     public static void main(String[] args) {
         int exitCode = new CommandLine(new EngineCli.EngineCliBuilder()
                 .simulationPath("com.gatling.lab.simulation")
-                .ressourceDir(IDEPathHelper.mavenResourcesDirectory.toString())
                 .resultDir(IDEPathHelper.resultsDirectory.toString())
                 .build()).execute(args);
         System.exit(exitCode);

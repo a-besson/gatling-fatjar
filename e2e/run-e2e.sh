@@ -85,7 +85,7 @@ run_cli() {
 
 # assert_report <report-dir> <label>: checks a single Gatling report directory.
 assert_report() {
-  local report_dir="$1" label="$2" artifact stats_json
+  local report_dir="$1" label="$2" artifact
 
   for artifact in index.html simulation.log; do
     if [[ -s "${report_dir}/${artifact}" ]]; then
@@ -102,32 +102,48 @@ assert_report() {
   else
     fail "${label}: report has no javascript assets (js/*.js)"
   fi
+}
 
-  stats_json="${report_dir}/js/global_stats.json"
-  if [[ -s "${stats_json}" ]]; then
-    if python3 - "${stats_json}" "${EXPECTED_REQUESTS}" <<'PY'
-import json, sys
+# assert_console_stats <expected-summaries>: reads the run's console summaries.
+#
+# Gatling 3.15 dropped js/global_stats.json from the report, so the request
+# counts are only available from the summary Gatling prints per simulation:
+#
+#   > request count       |        10 |        10 |         -
+#                            Total        OK          KO ("-" means none)
+#
+# One summary is emitted per simulation, so the count of matching lines also
+# proves every simulation really ran.
+assert_console_stats() {
+  local expected_summaries="$1"
+  if python3 - "${RUN_LOG}" "${EXPECTED_REQUESTS}" "${expected_summaries}" <<'PY'
+import re, sys
 
-with open(sys.argv[1]) as fh:
-    stats = json.load(fh)["numberOfRequests"]
-expected = int(sys.argv[2])
-print(f"    global_stats.json: total={stats['total']} ok={stats['ok']} ko={stats['ko']}")
-sys.exit(0 if stats["total"] == expected and stats["ok"] == expected and stats["ko"] == 0 else 1)
+log, expected_requests, expected_summaries = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+pattern = re.compile(r"^> request count\s+\|\s*(\S+)\s*\|\s*(\S+)\s*\|\s*(\S+)\s*$")
+
+summaries = []
+with open(log, encoding="utf-8", errors="replace") as fh:
+    for line in fh:
+        match = pattern.match(line.strip())
+        if match:
+            summaries.append(match.groups())
+
+print(f"    console summaries (total/ok/ko): {summaries}")
+if len(summaries) != expected_summaries:
+    print(f"    expected {expected_summaries} summary line(s), got {len(summaries)}")
+    sys.exit(1)
+
+for total, ok, ko in summaries:
+    # Gatling prints "-" rather than 0 in an empty column.
+    if total != str(expected_requests) or ok != str(expected_requests) or ko not in ("-", "0"):
+        sys.exit(1)
+sys.exit(0)
 PY
-    then
-      pass "${label}: all ${EXPECTED_REQUESTS} requests succeeded (KO=0)"
-    else
-      fail "${label}: expected ${EXPECTED_REQUESTS} requests with KO=0 in global_stats.json"
-    fi
+  then
+    pass "${expected_summaries} summary/summaries, each ${EXPECTED_REQUESTS} requests with no KO"
   else
-    # Newer Gatling versions may reshape the report; fall back to the console
-    # summary rather than silently skipping the check.
-    info "no js/global_stats.json, falling back to the console summary"
-    if grep -qaE "request count +${EXPECTED_REQUESTS} \(OK=${EXPECTED_REQUESTS} +KO=0 +\)" "${RUN_LOG}"; then
-      pass "${label}: console summary reports ${EXPECTED_REQUESTS} requests with KO=0"
-    else
-      fail "${label}: could not confirm ${EXPECTED_REQUESTS} requests with KO=0"
-    fi
+    fail "expected ${expected_summaries} summary/summaries of ${EXPECTED_REQUESTS} requests with no KO"
   fi
 }
 
@@ -293,20 +309,22 @@ else
   fail "expected 'Found simulations: 1'"
 fi
 
-# Gatling reconfigures logback once it boots, so the application's own INFO
-# lines are only visible up to the first simulation start. Assert on that one
-# and on the Gatling summary; the rest is asserted on the generated reports.
+# Gatling shuts the Logback context down at the end of every run, which is why
+# simulations are forked: the runner's own start/end lines have to survive the
+# runs they frame, and here they do because that shutdown happens in the child.
 if grep -qaF 'Start com.gatling.lab.simulation: com.gatling.lab.simulation.BasicSimulation1' "${RUN_LOG}"; then
   pass "the runner started BasicSimulation1"
 else
   fail "the runner never logged the start of BasicSimulation1"
 fi
 
-if grep -qaF 'Simulation com.gatling.lab.simulation.BasicSimulation1 completed' "${RUN_LOG}"; then
-  pass "Gatling reported the simulation as completed"
+if grep -qaF 'End com.gatling.lab.simulation: com.gatling.lab.simulation.BasicSimulation1' "${RUN_LOG}"; then
+  pass "the runner returned from BasicSimulation1"
 else
-  fail "Gatling never reported the simulation as completed"
+  fail "the runner never logged the end of BasicSimulation1"
 fi
+
+assert_console_stats 1
 
 assert_rc "${EXIT_OK}" "${single_rc}" "successful run"
 
@@ -351,6 +369,17 @@ for expected_report in basicsimulation basicsimulation1 basicsimulation2 basicsi
     fail "expected exactly one report for ${expected_report}, found ${#matched[@]}"
   fi
 done
+
+assert_console_stats "${EXPECTED_SIMULATIONS}"
+
+# Each simulation is forked into its own JVM; the runner's own log lines have to
+# frame all of them, not just the first.
+if [[ "$(grep -aco 'Start com.gatling.lab.simulation:' "${RUN_LOG}")" -eq "${EXPECTED_SIMULATIONS}" \
+   && "$(grep -aco 'End com.gatling.lab.simulation:' "${RUN_LOG}")" -eq "${EXPECTED_SIMULATIONS}" ]]; then
+  pass "the runner framed all ${EXPECTED_SIMULATIONS} simulations with start/end lines"
+else
+  fail "expected ${EXPECTED_SIMULATIONS} start and end lines from the runner"
+fi
 
 # The stub is the only server involved, so its access log is independent proof
 # that the traffic really left the JVM.
