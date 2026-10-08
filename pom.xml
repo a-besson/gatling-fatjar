@@ -24,7 +24,7 @@
     <netty-bom.version>4.2.14.Final</netty-bom.version>
     <scala-library.version>2.13.18</scala-library.version>
     <logback.version>1.5.32</logback.version>
-    <jackson.version>2.18.9</jackson.version>
+    <jackson.version>2.18.11</jackson.version>
 
     <!-- maven plugins versions -->
     <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
